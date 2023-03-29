@@ -1,33 +1,35 @@
 use std::time::{Duration, Instant};
 
 use crate::model::Vertex;
+use crate::physics::{Entity, EntityComponent};
+use crate::physics::InstanceData;
+use crate::physics::PhysicsState;
 use crate::texture::Texture;
+use anyhow::Result;
 use camera::Camera;
+use cgmath::Vector3;
 use imgui::Condition;
 use imgui::FontSource;
 use imgui_wgpu::Renderer;
 use imgui_wgpu::RendererConfig;
-use model::{DrawModel, Model};
+use model::{DrawModel};
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
-
+use crate::physics::rigid_body::RigidBody;
 use cgmath::prelude::*;
+use crate::graphics::InstanceRaw;
+use crate::physics::EntityComponent::RigidBodyEntity;
 
 mod camera;
 mod model;
+mod physics;
 mod resources;
 mod texture;
-
-const NUM_INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-    0.0,
-    NUM_INSTANCES_PER_ROW as f32 * 0.5,
-);
+mod graphics;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -47,58 +49,6 @@ impl CameraUniform {
     }
 }
 
-struct Instance {
-    position: cgmath::Vector3<f32>,
-    rotation: cgmath::Quaternion<f32>,
-}
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceRaw {
-    model: [[f32; 4]; 4],
-}
-
-impl Instance {
-    fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position)
-                * cgmath::Matrix4::from(self.rotation))
-            .into(),
-        }
-    }
-}
-
-impl InstanceRaw {
-    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
-        use std::mem;
-
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: 0,
-                    shader_location: 5,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
-                    shader_location: 6,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
-                    shader_location: 7,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
-                    shader_location: 8,
-                },
-            ],
-        }
-    }
-}
 
 struct State {
     surface: wgpu::Surface,
@@ -113,15 +63,13 @@ struct State {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    instances: Vec<Instance>,
-    instance_buffer: wgpu::Buffer,
     depth_texture: Texture,
-    obj_model: Model,
     mouse_pressed: bool,
     imgui: imgui::Context,
-    imgui_renderer: imgui_wgpu::Renderer,
+    imgui_renderer: Renderer,
     imgui_winit_platform: imgui_winit_support::WinitPlatform,
-    show_imgui_windows: bool,
+
+    physics_state: PhysicsState,
 }
 
 impl State {
@@ -197,7 +145,7 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let camera = Camera::new((0.0, 5.0, 10.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
+        let camera = Camera::new((0.0, 0.0, 20.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
         let projection =
             camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
         let camera_controller = camera::CameraController::new(4.0, 0.4);
@@ -263,7 +211,7 @@ impl State {
         });
 
         let depth_texture =
-            texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+            Texture::create_depth_texture(&device, &config, "depth_texture");
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -290,7 +238,7 @@ impl State {
                 conservative: false,
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: texture::Texture::DEPTH_FORMAT,
+                format: Texture::DEPTH_FORMAT,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: wgpu::StencilState::default(),
@@ -311,36 +259,6 @@ impl State {
                 })],
             }),
             multiview: None,
-        });
-
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: x as f32,
-                        y: 0.0,
-                        z: z as f32,
-                    } - INSTANCE_DISPLACEMENT;
-
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
-
-                    Instance { position, rotation }
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
         });
 
         let obj_model =
@@ -375,6 +293,15 @@ impl State {
 
         let imgui_renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
 
+        let physics_state = PhysicsState {
+            entities: vec![Entity {
+                position: Vector3::new(0.0, 0.0, 0.0),
+                rotation: cgmath::Quaternion::from_angle_x(cgmath::Deg(0.0)),
+                components: vec![EntityComponent::RigidBodyEntity(RigidBody::new())],
+                instance: 0,
+            }],
+            instances: vec![InstanceData { model: obj_model }],
+        };
         Self {
             surface,
             device,
@@ -388,23 +315,22 @@ impl State {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            instances,
-            instance_buffer,
             depth_texture,
-            obj_model,
             mouse_pressed: false,
             imgui,
             imgui_renderer,
             imgui_winit_platform: platform,
-            show_imgui_windows: true,
+            physics_state,
         }
     }
 
     fn render(
         &mut self,
         dt: Duration,
-        window: &winit::window::Window,
+        window: &Window,
     ) -> Result<(), wgpu::SurfaceError> {
+        self.physics_state.apply_gravity();
+        self.physics_state.step(&dt);
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -417,6 +343,7 @@ impl State {
             });
 
         {
+            let instances = self.physics_state.get_render_data(&self.device);
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -441,49 +368,28 @@ impl State {
                     stencil_ops: None,
                 }),
             });
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_pipeline(&self.render_pipeline);
 
-            render_pass.draw_model_instanced(
-                &self.obj_model,
-                0..self.instances.len() as u32,
-                &self.camera_bind_group,
-            );
+            render_pass.set_pipeline(&self.render_pipeline);
+            for instance_render_data in &instances {
+                render_pass.set_vertex_buffer(1, instance_render_data.instance_buffer.slice(..));
+
+                render_pass.draw_model_instanced(
+                    &instance_render_data.model,
+                    0..instance_render_data.instance_count,
+                    &self.camera_bind_group,
+                );
+            }
+            drop(render_pass);
         }
+/*
         {
             self.imgui.io_mut().update_delta_time(dt);
 
             self.imgui_winit_platform
                 .prepare_frame(self.imgui.io_mut(), window)
                 .expect("Failed to prepare frame");
-            let ui = self.imgui.frame();
 
-            {
-                let window = ui.window("Hello world");
-                window
-                    .size([300.0, 100.0], Condition::FirstUseEver)
-                    .build(|| {
-                        ui.text("Hello world!");
-                        ui.text("This...is...imgui-rs on WGPU!");
-                        ui.separator();
-                        let mouse_pos = ui.io().mouse_pos;
-                        ui.text(format!(
-                            "Mouse Position: ({:.1},{:.1})",
-                            mouse_pos[0], mouse_pos[1]
-                        ));
-                    });
-
-                let window = ui.window("Hello too");
-                window
-                    .size([400.0, 200.0], Condition::FirstUseEver)
-                    .position([400.0, 200.0], Condition::FirstUseEver)
-                    .build(|| {
-                        ui.text(format!("FPS: {:?}", 1.0 / dt.as_secs_f32()));
-                    });
-
-                ui.show_demo_window(&mut self.show_imgui_windows);
-            }
-
+            self.prepare_imgui(dt);
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("imGUI Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -497,13 +403,17 @@ impl State {
                 })],
                 depth_stencil_attachment: None,
             });
-            self.imgui_renderer.render(
-                self.imgui.render(),
-                &self.queue,
-                &self.device,
-                &mut render_pass,
-            );
+            self.imgui_renderer
+                .render(
+                    self.imgui.render(),
+                    &self.queue,
+                    &self.device,
+                    &mut render_pass,
+                )
+                .expect("Could not render imgui");
         }
+
+ */
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -532,6 +442,39 @@ impl State {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+    }
+
+    fn prepare_imgui(&mut self, dt: Duration) {
+        let ui = self.imgui.frame();
+
+        {
+            let window = ui.window("Hello world");
+            window
+                .size([300.0, 100.0], Condition::FirstUseEver)
+                .build(|| {
+                    ui.text("Hello world!");
+                    ui.text("This...is...imgui-rs on WGPU!");
+                    ui.separator();
+                    let is_clicked = ui.button("test");
+                    if is_clicked {
+                        ui.text("clicked the button");
+                    }
+                    let mouse_pos = ui.io().mouse_pos;
+                    ui.text(format!(
+                        "Mouse Position: ({:.1},{:.1})",
+                        mouse_pos[0], mouse_pos[1]
+                    ));
+                });
+
+            let window = ui.window("Hello too");
+
+            window
+                .size([400.0, 200.0], Condition::FirstUseEver)
+                .position([400.0, 200.0], Condition::FirstUseEver)
+                .build(|| {
+                    ui.text(format!("FPS: {:?}", 1.0 / dt.as_secs_f32()));
+                });
+        }
     }
 }
 
@@ -602,5 +545,8 @@ pub async fn run() {
             },
             _ => {}
         }
+        state
+            .imgui_winit_platform
+            .handle_event(state.imgui.io_mut(), &window, &event);
     });
 }
