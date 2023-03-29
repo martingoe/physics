@@ -1,7 +1,7 @@
 use std::iter::zip;
 use std::time::Duration;
+use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use crate::model::Model;
-use cgmath::{Quaternion, Vector3};
 use wgpu::{util::DeviceExt,
            Device};
 use crate::graphics::Instance;
@@ -21,7 +21,7 @@ trait UpdatingEntityComponent {
 
 pub struct Entity {
     pub position: Vector3<f32>,
-    pub rotation: Quaternion<f32>,
+    pub rotation: UnitQuaternion<f32>,
     pub components: Vec<EntityComponent>,
     pub instance: u32,
 }

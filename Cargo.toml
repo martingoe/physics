@@ -15,7 +15,7 @@ wgpu = "0.15"
 pollster = "0.2"
 bytemuck = { version = "1.4", features = [ "derive" ] }
 anyhow = "1.0"
-cgmath = "0.18"
+nalgebra = "0.32.2"
 tobj = { version = "3.2.1", features = ["async",]}
 imgui-wgpu = "0.22.0"
 imgui = "0.10.0"

@@ -1,8 +1,8 @@
-use cgmath::Vector3;
+use nalgebra::{Matrix4, Quaternion, UnitQuaternion, Vector3};
 
 pub(crate) struct Instance {
     pub position: Vector3<f32>,
-    pub rotation: cgmath::Quaternion<f32>,
+    pub rotation: UnitQuaternion<f32>,
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -13,8 +13,8 @@ pub struct InstanceRaw {
 impl Instance {
     pub fn to_raw(&self) -> InstanceRaw {
         InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position)
-                * cgmath::Matrix4::from(self.rotation))
+            model: (Matrix4::new_translation(&self.position)
+                * self.rotation.to_homogeneous())
                 .into(),
         }
     }

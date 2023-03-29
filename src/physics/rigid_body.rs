@@ -1,6 +1,5 @@
-use std::ops::AddAssign;
 use std::time::Duration;
-use cgmath::{Deg, InnerSpace, Matrix3, Quaternion, Rotation, Rotation3, SquareMatrix, Vector3, Zero};
+use nalgebra::{Matrix3, Quaternion, UnitQuaternion, Vector3};
 
 use super::Entity;
 
@@ -16,7 +15,7 @@ pub struct RigidBody {
     inertia_tensor: Matrix3<f32>,
 
     pub(crate) position: Vector3<f32>,
-    pub(crate) rotation: Quaternion<f32>,
+    pub(crate) rotation: UnitQuaternion<f32>,
 }
 
 impl RigidBody {
@@ -31,15 +30,16 @@ impl RigidBody {
         //self.position += self.lin_velocity * dt;
 
         let angular_momentum = self.torque * dt;
-        self.angular_velocity += self.inertia_tensor.invert().unwrap() * angular_momentum;
+        self.angular_velocity += self.inertia_tensor.try_inverse().unwrap() * angular_momentum;
         // self.angular_velocity += self.torque.cross(self.lin_velocity) / self.mass * dt;
         let a = self.angular_velocity.normalize();
         let theta = self.angular_velocity.magnitude() * dt;
-        let dq = Quaternion::from_sv((theta * 0.5).cos(), a * (theta * 0.5).sin());
+        //let dq = UnitQuaternion::new((theta * 0.5).cos(), a * (theta * 0.5).sin());
+        let dq = UnitQuaternion::new(a * (theta * 0.5).sin());
         self.rotation = dq * self.rotation;
 
-        self.force = Vector3::zero();
-        self.torque = Vector3::zero();
+        self.force = Vector3::zeros();
+        self.torque = Vector3::zeros();
     }
 }
 impl RigidBody {
@@ -52,7 +52,7 @@ impl RigidBody {
         force: Vector3<f32>,
         point: Vector3<f32>,
     ) {
-        self.torque += (point - self.position).cross(force);
+        self.torque += (point - self.position).cross(&force);
         self.force += force;
     }
     pub fn apply_force_at_offset(
@@ -60,20 +60,20 @@ impl RigidBody {
         force: Vector3<f32>,
         offset: Vector3<f32>,
     ) {
-        self.torque += (offset).cross(force);
+        self.torque += (offset).cross(&force);
         self.force += force;
     }
 
     pub fn new() -> Self{
         Self{
             mass: 0.001,
-            lin_velocity: Vector3::zero(),
-            angular_velocity: Vector3::zero(),
-            force: Vector3::zero(),
-            torque: Vector3::zero(),
+            lin_velocity: Vector3::zeros(),
+            angular_velocity: Vector3::zeros(),
+            force: Vector3::zeros(),
+            torque: Vector3::zeros(),
             inertia_tensor: Matrix3::identity(),
-            position: Vector3::zero(),
-            rotation: Quaternion::from_angle_x(Deg(0.0)),
+            position: Vector3::zeros(),
+            rotation: UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 0.0),
         }
     }
 }

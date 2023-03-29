@@ -1,3 +1,4 @@
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
 use std::time::{Duration, Instant};
 
 use crate::model::Vertex;
@@ -7,11 +8,11 @@ use crate::physics::PhysicsState;
 use crate::texture::Texture;
 use anyhow::Result;
 use camera::Camera;
-use cgmath::Vector3;
 use imgui::Condition;
 use imgui::FontSource;
 use imgui_wgpu::Renderer;
 use imgui_wgpu::RendererConfig;
+use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
 use model::{DrawModel};
 use wgpu::util::DeviceExt;
 use winit::{
@@ -20,7 +21,6 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 use crate::physics::rigid_body::RigidBody;
-use cgmath::prelude::*;
 use crate::graphics::InstanceRaw;
 use crate::physics::EntityComponent::RigidBodyEntity;
 
@@ -40,7 +40,7 @@ struct CameraUniform {
 impl CameraUniform {
     fn new() -> Self {
         Self {
-            view_proj: cgmath::Matrix4::identity().into(),
+            view_proj: Matrix4::identity().into(),
         }
     }
 
@@ -145,9 +145,9 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let camera = Camera::new((0.0, 0.0, 20.0), cgmath::Deg(-90.0), cgmath::Deg(-20.0));
+        let camera = Camera::new(Point3::new(0.0, 0.0, 20.0), -FRAC_PI_2, (- PI / 20.0));
         let projection =
-            camera::Projection::new(config.width, config.height, cgmath::Deg(45.0), 0.1, 100.0);
+            camera::Projection::new(config.width, config.height, FRAC_PI_8, 0.1, 100.0);
         let camera_controller = camera::CameraController::new(4.0, 0.4);
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
@@ -296,7 +296,7 @@ impl State {
         let physics_state = PhysicsState {
             entities: vec![Entity {
                 position: Vector3::new(0.0, 0.0, 0.0),
-                rotation: cgmath::Quaternion::from_angle_x(cgmath::Deg(0.0)),
+                rotation: UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 0.0),
                 components: vec![EntityComponent::RigidBodyEntity(RigidBody::new())],
                 instance: 0,
             }],
@@ -381,7 +381,7 @@ impl State {
             }
             drop(render_pass);
         }
-/*
+
         {
             self.imgui.io_mut().update_delta_time(dt);
 
@@ -413,7 +413,7 @@ impl State {
                 .expect("Could not render imgui");
         }
 
- */
+
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
