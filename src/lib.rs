@@ -292,16 +292,22 @@ impl State {
         };
 
         let imgui_renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
+        let rigid_body = RigidBody::new(0);
+        // let bodies = vec![EntityComponent::RigidBodyEntity(rigid_body)];
+        let constraint = Constraints::ConstantRotation(ConstantRotationConstraint{ rigid_body: rigid_body.index, rotation: Vector3::new(1.0, 0.5, 0.75) });
 
-        let physics_state = PhysicsState {
+        let mut physics_state = PhysicsState {
             entities: vec![Entity {
-                position: Vector3::new(0.0, 0.0, 0.0),
-                rotation: UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 0.0),
-                components: vec![EntityComponent::RigidBodyEntity(RigidBody::new())],
+                body: rigid_body,
                 instance: 0,
             }],
             instances: vec![InstanceData { model: obj_model }],
         };
+        physics_state.apply_gravity();
+
+
+        let constraint_solver = ConstraintSolver{ constraints: vec![constraint] };
+        constraint_solver.solve_constraints(&mut physics_state);
         Self {
             surface,
             device,

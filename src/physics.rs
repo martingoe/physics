@@ -1,6 +1,6 @@
 use std::iter::zip;
 use std::time::Duration;
-use nalgebra::{Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{UnitQuaternion, Vector3};
 use crate::model::Model;
 use wgpu::{util::DeviceExt,
            Device};
@@ -9,8 +9,11 @@ use crate::graphics::Instance;
 use self::rigid_body::RigidBody;
 
 pub mod rigid_body;
-mod constraint_solving;
+pub mod constraint_solving;
 
+pub trait PhysicsConstraint {
+    
+}
 pub enum EntityComponent {
     RigidBodyEntity(RigidBody),
 }
@@ -20,9 +23,7 @@ trait UpdatingEntityComponent {
 }
 
 pub struct Entity {
-    pub position: Vector3<f32>,
-    pub rotation: UnitQuaternion<f32>,
-    pub components: Vec<EntityComponent>,
+    pub body: RigidBody,
     pub instance: u32,
 }
 
@@ -31,8 +32,8 @@ pub struct InstanceData {
 }
 
 pub struct PhysicsState {
-    pub(crate) entities: Vec<Entity>,
-    pub(crate) instances: Vec<InstanceData>,
+    pub entities: Vec<Entity>,
+    pub instances: Vec<InstanceData>,
 }
 
 pub struct InstanceRenderData<'a> {
@@ -46,8 +47,8 @@ impl PhysicsState {
         instance_data.resize_with(self.instances.len(), || Vec::new());
         for entity in &self.entities{
             instance_data[entity.instance as usize].push(Instance {
-                position: entity.position,
-                rotation: entity.rotation,
+                position: entity.body.position,
+                rotation: entity.body.rotation,
             }
                 .to_raw());
         }
@@ -68,26 +69,12 @@ impl PhysicsState {
 
     pub fn apply_gravity(&mut self) {
         for entity in self.entities.iter_mut() {
-            for component  in entity.components.iter_mut(){
-                match component {
-                    EntityComponent::RigidBodyEntity(ref mut rigid_body) => {
-                        rigid_body.apply_force_at_offset(Vector3::new(0.0, -0.00000981, 0.0), Vector3::new(0.0, 0.0, 1000.5));
-                    }
-                }
-            }
+            entity.body.apply_force_at_offset(Vector3::new(0.0, -0.00000981, 0.0), Vector3::new(0.0, 0.0, 1000.5));
         }
     }
     pub fn step(&mut self, dt: &Duration) {
         for entity in self.entities.iter_mut(){
-            for component in entity.components.iter_mut(){
-                match component {
-                    EntityComponent::RigidBodyEntity(rigid_body) => {
-                        rigid_body.step(dt);
-                        entity.position = rigid_body.position;
-                        entity.rotation = rigid_body.rotation;
-                    }
-                }
-            }
+            entity.body.step(dt);
         }
     }
 }

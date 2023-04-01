@@ -1,28 +1,26 @@
 use std::time::Duration;
-use nalgebra::{Matrix3, Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
 use super::Entity;
 
 pub struct RigidBody {
-    mass: f32,
+    pub(crate) mass: f32,
 
-    lin_velocity: Vector3<f32>,
-    angular_velocity: Vector3<f32>,
+    pub lin_velocity: Vector3<f32>,
+    pub angular_velocity: Vector3<f32>,
 
-    force: Vector3<f32>,
-    torque: Vector3<f32>,
+    pub(crate) force: Vector3<f32>,
+    pub(crate) torque: Vector3<f32>,
 
     inertia_tensor: Matrix3<f32>,
 
     pub(crate) position: Vector3<f32>,
     pub(crate) rotation: UnitQuaternion<f32>,
+
+    pub index: usize
 }
 
 impl RigidBody {
-    pub fn update_entity(&self, entity: &mut Entity) {
-        entity.position = self.position;
-        entity.rotation = self.rotation;
-    }
     pub fn step(&mut self, dt: &Duration) {
         let dt = dt.as_secs_f32();
         // Euler Translation
@@ -64,7 +62,7 @@ impl RigidBody {
         self.force += force;
     }
 
-    pub fn new() -> Self{
+    pub fn new(index: usize) -> Self{
         Self{
             mass: 0.001,
             lin_velocity: Vector3::zeros(),
@@ -74,6 +72,7 @@ impl RigidBody {
             inertia_tensor: Matrix3::identity(),
             position: Vector3::zeros(),
             rotation: UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 0.0),
+            index,
         }
     }
 }
