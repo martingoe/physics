@@ -1,4 +1,4 @@
-use nalgebra::{Matrix4, Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{Matrix4, UnitQuaternion, Vector3};
 
 pub(crate) struct Instance {
     pub position: Vector3<f32>,
