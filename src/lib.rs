@@ -1,8 +1,8 @@
-use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, FRAC_PI_8, PI};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_8, PI};
 use std::time::{Duration, Instant};
 
 use crate::model::Vertex;
-use crate::physics::{Entity, EntityComponent};
+use crate::physics::{Entity, EntityComponent, rigid_body};
 use crate::physics::InstanceData;
 use crate::physics::PhysicsState;
 use crate::texture::Texture;
@@ -22,7 +22,7 @@ use winit::{
 };
 use crate::physics::rigid_body::RigidBody;
 use crate::graphics::InstanceRaw;
-use crate::physics::EntityComponent::RigidBodyEntity;
+use crate::physics::constraint_solving::{ConstantRotationConstraint, Constraints, ConstraintSolver};
 
 mod camera;
 mod model;
@@ -428,7 +428,7 @@ impl State {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
             self.depth_texture =
-                texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+                Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
             self.projection.resize(new_size.width, new_size.height);
         }
     }
