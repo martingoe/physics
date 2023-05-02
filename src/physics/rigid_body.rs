@@ -1,8 +1,8 @@
 use std::time::Duration;
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
 
-use super::Entity;
 
+#[derive(Debug)]
 pub struct RigidBody {
     pub(crate) mass: f32,
 
@@ -14,8 +14,8 @@ pub struct RigidBody {
 
     inertia_tensor: Matrix3<f32>,
 
-    pub(crate) position: Vector3<f32>,
-    pub(crate) rotation: UnitQuaternion<f32>,
+    pub position: Vector3<f32>,
+    pub rotation: UnitQuaternion<f32>,
 
     pub index: usize
 }
@@ -25,17 +25,17 @@ impl RigidBody {
         let dt = dt.as_secs_f32();
         // Euler Translation
         self.lin_velocity += self.force / self.mass * dt;
-        //self.position += self.lin_velocity * dt;
+        self.position += self.lin_velocity * dt;
 
         let angular_momentum = self.torque * dt;
         self.angular_velocity += self.inertia_tensor.try_inverse().unwrap() * angular_momentum;
-        // self.angular_velocity += self.torque.cross(self.lin_velocity) / self.mass * dt;
-        let a = self.angular_velocity.normalize();
-        let theta = self.angular_velocity.magnitude() * dt;
-        //let dq = UnitQuaternion::new((theta * 0.5).cos(), a * (theta * 0.5).sin());
-        let dq = UnitQuaternion::new(a * (theta * 0.5).sin());
-        self.rotation = dq * self.rotation;
-
+        if self.angular_velocity != Vector3::<f32>::zeros() {
+            let a = self.angular_velocity.normalize();
+            let theta = self.angular_velocity.magnitude() * dt;
+            //let dq = UnitQuaternion::new((theta * 0.5).cos(), a * (theta * 0.5).sin());
+            let dq = UnitQuaternion::new(a * (theta * 0.5).sin());
+            self.rotation = dq * self.rotation;
+        }
         self.force = Vector3::zeros();
         self.torque = Vector3::zeros();
     }
@@ -64,7 +64,7 @@ impl RigidBody {
 
     pub fn new(index: usize) -> Self{
         Self{
-            mass: 0.001,
+            mass: 1.0,
             lin_velocity: Vector3::zeros(),
             angular_velocity: Vector3::zeros(),
             force: Vector3::zeros(),
