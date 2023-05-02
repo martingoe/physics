@@ -41,6 +41,7 @@ impl Vertex for ModelVertex {
     }
 }
 
+
 pub struct Model {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
