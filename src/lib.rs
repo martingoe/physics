@@ -1,28 +1,32 @@
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_8, PI};
 use std::time::{Duration, Instant};
 
-use crate::model::Vertex;
-use crate::physics::{Entity, EntityComponent, rigid_body};
-use crate::physics::InstanceData;
-use crate::physics::PhysicsState;
-use crate::texture::Texture;
 use anyhow::Result;
-use camera::Camera;
 use imgui::Condition;
 use imgui::FontSource;
 use imgui_wgpu::Renderer;
 use imgui_wgpu::RendererConfig;
-use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
-use model::{DrawModel};
+use nalgebra::{Dyn, Matrix4, OVector, Point3, UnitQuaternion, Vector3};
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
-use crate::physics::rigid_body::RigidBody;
+
+use camera::Camera;
+use model::DrawModel;
+
 use crate::graphics::InstanceRaw;
-use crate::physics::constraint_solving::{ConstantRotationConstraint, Constraints, ConstraintSolver};
+use crate::model::Vertex;
+use crate::physics::Entity;
+use crate::physics::constraints::{Constraints, ConstraintSolver};
+use crate::physics::constraints::fixed_orientation_constraint::FixedOrientationConstraint;
+use crate::physics::constraints::fixed_position_constraint::FixToPointConstraint;
+use crate::physics::InstanceData;
+use crate::physics::PhysicsState;
+use crate::physics::rigid_body::RigidBody;
+use crate::texture::Texture;
 
 mod camera;
 mod model;
@@ -70,6 +74,8 @@ struct State {
     imgui_winit_platform: imgui_winit_support::WinitPlatform,
 
     physics_state: PhysicsState,
+    constraint_solver: ConstraintSolver,
+    previous_solution: Option<OVector<f32, Dyn>>,
 }
 
 impl State {
@@ -77,11 +83,11 @@ impl State {
         match event {
             WindowEvent::KeyboardInput {
                 input:
-                    KeyboardInput {
-                        state,
-                        virtual_keycode: Some(key),
-                        ..
-                    },
+                KeyboardInput {
+                    state,
+                    virtual_keycode: Some(key),
+                    ..
+                },
                 ..
             } => self.camera_controller.process_keyboard(*key, *state),
             WindowEvent::MouseWheel { delta, .. } => {
@@ -145,7 +151,7 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        let camera = Camera::new(Point3::new(0.0, 0.0, 20.0), -FRAC_PI_2, (- PI / 20.0));
+        let camera = Camera::new(Point3::new(0.0, 0.0, 20.0), -FRAC_PI_2, -PI / 20.0);
         let projection =
             camera::Projection::new(config.width, config.height, FRAC_PI_8, 0.1, 100.0);
         let camera_controller = camera::CameraController::new(4.0, 0.4);
@@ -292,9 +298,12 @@ impl State {
         };
 
         let imgui_renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
-        let rigid_body = RigidBody::new(0);
+        let mut rigid_body = RigidBody::new(0);
+        rigid_body.position = Vector3::<f32>::new(1.0, 0.0, 0.0);
+        rigid_body.rotation = UnitQuaternion::from_euler_angles(1.0, 0.0, 0.0);
         // let bodies = vec![EntityComponent::RigidBodyEntity(rigid_body)];
-        let constraint = Constraints::ConstantRotation(ConstantRotationConstraint{ rigid_body: rigid_body.index, rotation: Vector3::new(1.0, 0.5, 0.75) });
+        let constraint = Constraints::FixedPosition(FixToPointConstraint { rigid_body: rigid_body.index, position: Vector3::new(0.0, 0.0, 0.0) });
+        let constraint2 = Constraints::FixedOrientation(FixedOrientationConstraint { rigid_body: rigid_body.index, position: Vector3::new(0.0, 0.0, 0.0) });
 
         let mut physics_state = PhysicsState {
             entities: vec![Entity {
@@ -306,8 +315,7 @@ impl State {
         physics_state.apply_gravity();
 
 
-        let constraint_solver = ConstraintSolver{ constraints: vec![constraint] };
-        constraint_solver.solve_constraints(&mut physics_state);
+        let constraint_solver = ConstraintSolver { constraints: vec![constraint, constraint2] };
         Self {
             surface,
             device,
@@ -327,6 +335,8 @@ impl State {
             imgui_renderer,
             imgui_winit_platform: platform,
             physics_state,
+            constraint_solver,
+            previous_solution: None,
         }
     }
 
@@ -336,6 +346,9 @@ impl State {
         window: &Window,
     ) -> Result<(), wgpu::SurfaceError> {
         self.physics_state.apply_gravity();
+        self.previous_solution = self.constraint_solver.solve_constraints(&mut self.physics_state, &self.previous_solution);
+
+        println!("{:?}" , self.physics_state.entities[0].body);
         self.physics_state.step(&dt);
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -418,7 +431,6 @@ impl State {
                 )
                 .expect("Could not render imgui");
         }
-
 
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -538,11 +550,11 @@ pub async fn run() {
                 WindowEvent::CloseRequested
                 | WindowEvent::KeyboardInput {
                     input:
-                        KeyboardInput {
-                            state: ElementState::Pressed,
-                            virtual_keycode: Some(VirtualKeyCode::Escape),
-                            ..
-                        },
+                    KeyboardInput {
+                        state: ElementState::Pressed,
+                        virtual_keycode: Some(VirtualKeyCode::Escape),
+                        ..
+                    },
                     ..
                 } => *control_flow = ControlFlow::Exit,
                 _ => {
