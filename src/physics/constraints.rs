@@ -163,8 +163,13 @@ impl ConstraintSolver {
         let rhs =
             j_dot_times_q_dot - (j.multiply_vector(&existing_forces.component_mul(&inv_masses))) - k_s - k_d;
 
-        let lambda = SLE_SOLVER.solve(&j, &inv_masses, &rhs, &previous_solution);
+        let lambda = SLE_SOLVER.solve(&j, &inv_masses, &rhs, previous_solution);
 
+        Self::update_state_with_solution(physics_state, &mut j, &lambda);
+        lambda
+    }
+
+    fn update_state_with_solution(physics_state: &mut PhysicsState, j: &SparseMatrix, lambda: &Option<OVector<f32, Dyn>>) {
         if let Some(solution) = &lambda {
             let res = j.tr_multiply_vector(&solution);
             for (i, column) in res.column_iter().enumerate() {
@@ -172,7 +177,6 @@ impl ConstraintSolver {
                 physics_state.entities[i].body.torque += column.view((3, 0), (3, 1));
             }
         }
-        lambda
     }
 
     fn get_full_constraint_count(&self) -> usize {

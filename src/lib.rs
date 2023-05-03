@@ -348,7 +348,6 @@ impl State {
         self.physics_state.apply_gravity();
         self.previous_solution = self.constraint_solver.solve_constraints(&mut self.physics_state, &self.previous_solution);
 
-        println!("{:?}" , self.physics_state.entities[0].body);
         self.physics_state.step(&dt);
         let output = self.surface.get_current_texture()?;
         let view = output

@@ -23,8 +23,6 @@ impl Constraint for FixToPointConstraint {
         j[(1, 1)] = 1.0;
         j[(2, 2)] = 1.0;
 
-
-
         ConstraintOutput { c, j, j_dot, kd: Vector3::from_element(KD), ks: Vector3::from_element(KS) }
     }
 

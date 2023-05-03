@@ -21,9 +21,7 @@ impl Constraint for FixedOrientationConstraint {
         let j_dot = SMatrix::zeros();
         let mut j: SMatrix<f32, { MAX_CONSTRAINT_COUNT }, { 6 * MAX_CONSTRAINT_BODIES }> =
             SMatrix::zeros();
-        //j[(0, 3)] = physics_state.entities[self.rigid_body].body.angular_velocity.x;
-        //j[(1, 4)] = physics_state.entities[self.rigid_body].body.angular_velocity.y;
-        //j[(2, 5)] = physics_state.entities[self.rigid_body].body.angular_velocity.z;
+
         j[(0, 3)] = 1.0;
         j[(1, 4)] = 1.0;
         j[(2, 5)] = 1.0;

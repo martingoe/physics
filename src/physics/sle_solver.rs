@@ -19,8 +19,8 @@ impl SLESolver {
 }
 
 fn solve_conjugate_gradient(j: &SparseMatrix, inv_masses: &OVector<f32, Dyn>, rhs: &OVector<f32, Dyn>, previous: &Option<OVector<f32, Dyn>>) -> Option<OVector<f32, Dyn>> {
-    let mut x = if let Some(test) = previous{
-        test.to_owned()
+    let mut x = if let Some(previous_solution) = previous{
+        previous_solution.to_owned()
     } else {
         OVector::<f32, Dyn>::zeros(rhs.nrows())
     };
@@ -42,7 +42,6 @@ fn solve_conjugate_gradient(j: &SparseMatrix, inv_masses: &OVector<f32, Dyn>, rh
         let beta = r.magnitude_squared() / rk_magnitude;
         p = &r + beta * p;
     }
-    println!("Could not solve");
     None
 }
 

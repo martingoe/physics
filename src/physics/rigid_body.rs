@@ -32,7 +32,6 @@ impl RigidBody {
         if self.angular_velocity != Vector3::<f32>::zeros() {
             let a = self.angular_velocity.normalize();
             let theta = self.angular_velocity.magnitude() * dt;
-            //let dq = UnitQuaternion::new((theta * 0.5).cos(), a * (theta * 0.5).sin());
             let dq = UnitQuaternion::new(a * (theta * 0.5).sin());
             self.rotation = dq * self.rotation;
         }
