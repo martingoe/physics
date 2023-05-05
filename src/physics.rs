@@ -1,9 +1,10 @@
-use crate::graphics::Instance;
-use crate::model::Model;
-use nalgebra::Vector3;
+use nalgebra::{Dyn, OVector, Vector3};
 use std::iter::zip;
 use std::time::Duration;
 use wgpu::{util::DeviceExt, Device};
+use crate::physics::constraints::ConstraintSolver;
+use crate::rendering::graphics::Instance;
+use crate::rendering::model::Model;
 
 use self::rigid_body::RigidBody;
 
@@ -24,7 +25,12 @@ pub struct InstanceData {
 pub struct PhysicsState {
     pub entities: Vec<Entity>,
     pub instances: Vec<InstanceData>,
+    pub(crate) constraint_solver: ConstraintSolver,
+    pub(crate) previous_solution: Option<OVector<f32, Dyn>>,
+
 }
+
+
 
 pub struct InstanceRenderData<'a> {
     pub model: &'a Model,
@@ -32,6 +38,23 @@ pub struct InstanceRenderData<'a> {
     pub instance_count: u32,
 }
 impl PhysicsState {
+    pub fn update(&mut self, dt: &Duration){
+        self.apply_gravity();
+        let lambda = self.constraint_solver.solve_constraints(&self, &self.previous_solution);
+
+        if let Some((solution, matrix)) = lambda {
+            self.previous_solution = Some(solution);
+            for (i, column) in matrix.column_iter().enumerate() {
+                self.entities[i].body.force += column.view((0, 0), (3, 1));
+                self.entities[i].body.torque += column.view((3, 0), (3, 1));
+            }
+        }
+
+
+        self.step(dt);
+    }
+
+
     pub fn get_render_data(&self, device: &Device) -> Vec<InstanceRenderData> {
         let mut instance_data = Vec::with_capacity(self.instances.len());
         instance_data.resize_with(self.instances.len(), || Vec::new());

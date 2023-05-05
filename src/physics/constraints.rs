@@ -1,14 +1,15 @@
-pub mod fixed_position_constraint;
-pub mod fixed_orientation_constraint;
+use std::ops::Neg;
 
 use nalgebra::{DVector, Dyn, OVector, SMatrix, SVector};
-use std::ops::Neg;
+
 use crate::physics::constraints::fixed_orientation_constraint::FixedOrientationConstraint;
 use crate::physics::constraints::fixed_position_constraint::FixToPointConstraint;
-
+use crate::physics::PhysicsState;
 use crate::physics::sle_solver::SLESolver;
 use crate::physics::sparse_matrix::SparseMatrix;
-use crate::physics::PhysicsState;
+
+pub mod fixed_position_constraint;
+pub mod fixed_orientation_constraint;
 
 const MAX_CONSTRAINT_BODIES: usize = 2;
 const MAX_CONSTRAINT_COUNT: usize = 3;
@@ -20,8 +21,9 @@ pub struct ConstraintOutput {
     j: SMatrix<f32, MAX_CONSTRAINT_COUNT, { 6 * MAX_CONSTRAINT_BODIES }>,
     j_dot: SMatrix<f32, MAX_CONSTRAINT_COUNT, { 6 * MAX_CONSTRAINT_BODIES }>,
     ks: SVector<f32, MAX_CONSTRAINT_COUNT>,
-    kd: SVector<f32, MAX_CONSTRAINT_COUNT>
+    kd: SVector<f32, MAX_CONSTRAINT_COUNT>,
 }
+
 pub trait Constraint {
     fn calculate(&self, physics_state: &PhysicsState) -> ConstraintOutput;
     fn get_constraint_count(&self) -> usize;
@@ -46,14 +48,12 @@ impl Constraints {
         match self {
             Constraints::FixedPosition(c) => c.get_constraint_count(),
             Constraints::FixedOrientation(c) => c.get_constraint_count(),
-
         }
     }
     fn get_rigid_bodies(&self) -> Vec<usize> {
         match self {
             Constraints::FixedPosition(c) => c.get_rigid_bodies(),
             Constraints::FixedOrientation(c) => c.get_rigid_bodies(),
-
         }
     }
 }
@@ -63,14 +63,12 @@ pub struct ConstraintSolver {
 }
 
 
-
-
 impl ConstraintSolver {
     pub fn solve_constraints(
         &self,
-        physics_state: &mut PhysicsState,
+        physics_state: &PhysicsState,
         previous_solution: &Option<OVector<f32, Dyn>>,
-    ) -> Option<OVector<f32, Dyn>> {
+    ) -> Option<(OVector<f32, Dyn>, OVector<f32, Dyn>)> {
         let inv_masses = OVector::<f32, Dyn>::from_iterator(
             physics_state.entities.len() * 6,
             physics_state.entities.iter().flat_map(|body| {
@@ -148,10 +146,8 @@ impl ConstraintSolver {
                     6,
                     j_dot_slice,
                 );
-
             }
             constraint_index += single_constraint_count;
-
         }
 
         let j_dot_times_q_dot = j_dot.multiply_vector(&q_dot).neg();
@@ -165,23 +161,17 @@ impl ConstraintSolver {
 
         let lambda = SLE_SOLVER.solve(&j, &inv_masses, &rhs, previous_solution);
 
-        Self::update_state_with_solution(physics_state, &mut j, &lambda);
-        lambda
+        if let Some(sol) = lambda {
+            let matrix = j.tr_multiply_vector(&sol);
+            return Some((sol, matrix));
+        }
+        None
     }
 
-    fn update_state_with_solution(physics_state: &mut PhysicsState, j: &SparseMatrix, lambda: &Option<OVector<f32, Dyn>>) {
-        if let Some(solution) = &lambda {
-            let res = j.tr_multiply_vector(&solution);
-            for (i, column) in res.column_iter().enumerate() {
-                physics_state.entities[i].body.force += column.view((0, 0), (3, 1));
-                physics_state.entities[i].body.torque += column.view((3, 0), (3, 1));
-            }
-        }
-    }
 
     fn get_full_constraint_count(&self) -> usize {
         self.constraints
             .iter()
-            .fold(0, |sum, c| sum + c.get_constraint_count())
+            .map(|c| c.get_constraint_count()).sum()
     }
 }
