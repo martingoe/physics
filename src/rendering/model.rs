@@ -1,6 +1,6 @@
 use std::ops::Range;
+use crate::rendering::texture::Texture;
 
-use crate::texture::Texture;
 
 pub trait Vertex {
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a>;
@@ -40,6 +40,7 @@ impl Vertex for ModelVertex {
         }
     }
 }
+
 
 pub struct Model {
     pub meshes: Vec<Mesh>,

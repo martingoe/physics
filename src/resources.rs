@@ -1,9 +1,8 @@
 use wgpu::util::DeviceExt;
 
-use crate::model::{self, Material, Model};
 use std::io::{BufReader, Cursor};
-
-use crate::texture::{self, Texture};
+use crate::rendering::model::{Material, Mesh, Model, ModelVertex};
+use crate::rendering::texture::Texture;
 
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
     let path = std::path::Path::new(env!("OUT_DIR"))
@@ -27,7 +26,7 @@ pub async fn load_texture(
     queue: &wgpu::Queue,
 ) -> anyhow::Result<Texture> {
     let data = load_binary(file_name).await?;
-    texture::Texture::from_bytes(device, queue, &data, file_name)
+    Texture::from_bytes(device, queue, &data, file_name)
 }
 
 pub async fn load_model(
@@ -83,7 +82,7 @@ pub async fn load_model(
         .into_iter()
         .map(|m| {
             let vertices = (0..m.mesh.positions.len() / 3)
-                .map(|i| model::ModelVertex {
+                .map(|i| ModelVertex {
                     position: [
                         m.mesh.positions[i * 3],
                         m.mesh.positions[i * 3 + 1],
@@ -108,7 +107,7 @@ pub async fn load_model(
                 usage: wgpu::BufferUsages::INDEX,
             });
 
-            model::Mesh {
+            Mesh {
                 name: file_name.to_string(),
                 vertex_buffer,
                 index_buffer,
@@ -117,5 +116,5 @@ pub async fn load_model(
             }
         })
         .collect::<Vec<_>>();
-    Ok(model::Model { meshes, materials })
+    Ok(Model { meshes, materials })
 }
