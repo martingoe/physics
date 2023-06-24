@@ -1,42 +1,53 @@
-use std::time::Duration;
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
+use specs::prelude::*;
+use specs::Component;
 
+use crate::DeltaTime;
+use crate::Position;
+use crate::Rotation;
 
-#[derive(Debug)]
+#[derive(Debug, Component)]
+#[storage(VecStorage)]
 pub struct RigidBody {
-    pub(crate) mass: f32,
+    pub mass: f32,
 
     pub lin_velocity: Vector3<f32>,
     pub angular_velocity: Vector3<f32>,
 
-    pub(crate) force: Vector3<f32>,
-    pub(crate) torque: Vector3<f32>,
+    pub force: Vector3<f32>,
+    pub torque: Vector3<f32>,
 
-    inertia_tensor: Matrix3<f32>,
-
-    pub position: Vector3<f32>,
-    pub rotation: UnitQuaternion<f32>,
-
-    pub index: usize
+    pub inertia_tensor: Matrix3<f32>,
 }
 
-impl RigidBody {
-    pub fn step(&mut self, dt: &Duration) {
-        let dt = dt.as_secs_f32();
-        // Euler Translation
-        self.lin_velocity += self.force / self.mass * dt;
-        self.position += self.lin_velocity * dt;
+pub struct RigidBodyStepSys;
+impl<'a> System<'a> for RigidBodyStepSys {
+    type SystemData = (
+        Read<'a, DeltaTime>,
+        WriteStorage<'a, Position>,
+        WriteStorage<'a, Rotation>,
+        WriteStorage<'a, RigidBody>,
+    );
 
-        let angular_momentum = self.torque * dt;
-        self.angular_velocity += self.inertia_tensor.try_inverse().unwrap() * angular_momentum;
-        if self.angular_velocity != Vector3::<f32>::zeros() {
-            let a = self.angular_velocity.normalize();
-            let theta = self.angular_velocity.magnitude() * dt;
-            let dq = UnitQuaternion::new(a * (theta * 0.5).sin());
-            self.rotation = dq * self.rotation;
+    fn run(&mut self, (dt, mut pos, mut rot, mut rigid_body): Self::SystemData) {
+        let dt = dt.0;
+        for (pos, rot, body) in (&mut pos, &mut rot, &mut rigid_body).join() {
+            let dt = dt.as_secs_f32();
+            // Euler Translation
+            body.lin_velocity += body.force / body.mass * dt;
+            pos.0 += body.lin_velocity * dt;
+
+            let angular_momentum = body.torque * dt;
+            body.angular_velocity += body.inertia_tensor.try_inverse().unwrap() * angular_momentum;
+            if body.angular_velocity != Vector3::<f32>::zeros() {
+                let a = body.angular_velocity.normalize();
+                let theta = body.angular_velocity.magnitude() * dt;
+                let dq = UnitQuaternion::new(a * (theta * 0.5).sin());
+                rot.0 = dq * rot.0;
+            }
+            body.force = Vector3::zeros();
+            body.torque = Vector3::zeros();
         }
-        self.force = Vector3::zeros();
-        self.torque = Vector3::zeros();
     }
 }
 impl RigidBody {
@@ -48,30 +59,25 @@ impl RigidBody {
         &mut self,
         force: Vector3<f32>,
         point: Vector3<f32>,
+        position: &Vector3<f32>,
     ) {
-        self.torque += (point - self.position).cross(&force);
+        self.torque += (point - position).cross(&force);
         self.force += force;
     }
-    pub fn apply_force_at_offset(
-        &mut self,
-        force: Vector3<f32>,
-        offset: Vector3<f32>,
-    ) {
+    pub fn apply_force_at_offset(&mut self, force: Vector3<f32>, offset: Vector3<f32>) {
         self.torque += (offset).cross(&force);
         self.force += force;
     }
-
-    pub fn new(index: usize) -> Self{
-        Self{
+}
+impl Default for RigidBody {
+    fn default() -> Self {
+        Self {
             mass: 1.0,
             lin_velocity: Vector3::zeros(),
             angular_velocity: Vector3::zeros(),
             force: Vector3::zeros(),
             torque: Vector3::zeros(),
             inertia_tensor: Matrix3::identity(),
-            position: Vector3::zeros(),
-            rotation: UnitQuaternion::from_axis_angle(&Vector3::x_axis(), 0.0),
-            index,
         }
     }
 }
