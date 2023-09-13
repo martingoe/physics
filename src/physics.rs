@@ -1,6 +1,6 @@
 use crate::rendering::model::Model;
 
-pub mod constraints;
+pub mod pbd;
 pub mod rigid_body;
 mod sle_solver;
 mod sparse_matrix;

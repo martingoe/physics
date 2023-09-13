@@ -1,6 +1,7 @@
-use std::ops::Range;
-use crate::rendering::texture::Texture;
+use wgpu::Buffer;
 
+use crate::rendering::texture::Texture;
+use std::ops::Range;
 
 pub trait Vertex {
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a>;
@@ -41,9 +42,13 @@ impl Vertex for ModelVertex {
     }
 }
 
-
 pub struct Model {
     pub meshes: Vec<Mesh>,
+    pub materials: Vec<Material>,
+}
+
+pub struct DeformableModel {
+    pub meshes: Vec<DeformableMesh>,
     pub materials: Vec<Material>,
 }
 
@@ -61,6 +66,16 @@ pub struct Mesh {
     pub material: usize,
 }
 
+pub struct DeformableMesh {
+    pub name: String,
+    pub vertices: Vec<ModelVertex>,
+
+    pub vertex_buffer: Option<wgpu::Buffer>,
+    pub index_buffer: wgpu::Buffer,
+    pub num_elements: u32,
+    pub material: usize,
+}
+
 pub trait DrawModel<'a> {
     fn draw_mesh(
         &mut self,
@@ -71,6 +86,14 @@ pub trait DrawModel<'a> {
     fn draw_mesh_instanced(
         &mut self,
         mesh: &'a Mesh,
+        material: &'a Material,
+        instances: Range<u32>,
+        camera_bind_group: &'a wgpu::BindGroup,
+    );
+
+    fn draw_deformable_mesh_instanced(
+        &mut self,
+        mesh: &'a DeformableMesh,
         material: &'a Material,
         instances: Range<u32>,
         camera_bind_group: &'a wgpu::BindGroup,
@@ -96,6 +119,20 @@ where
         camera_bind_group: &'b wgpu::BindGroup,
     ) {
         self.draw_mesh_instanced(mesh, material, 0..1, camera_bind_group);
+    }
+
+    fn draw_deformable_mesh_instanced(
+        &mut self,
+        mesh: &'a DeformableMesh,
+        material: &'a Material,
+        instances: Range<u32>,
+        camera_bind_group: &'a wgpu::BindGroup,
+    ) {
+        self.set_vertex_buffer(0, mesh.vertex_buffer.as_ref().unwrap().slice(..));
+        self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        self.set_bind_group(0, &material.bind_group, &[]);
+        self.set_bind_group(1, camera_bind_group, &[]);
+        self.draw_indexed(0..mesh.num_elements, 0, instances);
     }
 
     fn draw_mesh_instanced(

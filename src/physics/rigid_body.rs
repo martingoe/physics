@@ -11,6 +11,8 @@ use crate::Rotation;
 pub struct RigidBody {
     pub mass: f32,
 
+    pub inv_mass: f32,
+
     pub lin_velocity: Vector3<f32>,
     pub angular_velocity: Vector3<f32>,
 
@@ -73,7 +75,9 @@ impl Default for RigidBody {
     fn default() -> Self {
         Self {
             mass: 1.0,
+            inv_mass: 1.0,
             lin_velocity: Vector3::zeros(),
+
             angular_velocity: Vector3::zeros(),
             force: Vector3::zeros(),
             torque: Vector3::zeros(),

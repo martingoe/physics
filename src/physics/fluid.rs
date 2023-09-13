@@ -231,6 +231,27 @@ impl FluidSimulation {
                 }
             }
         }
+        for i in 1..=n {
+            x[index(n, i, 0, 0)] = (x[index(n, i, 1, 0)] + x[index(n, i, 0, 1)]) / 2.0;
+            x[index(n, i, 0, n + 1)] = (x[index(n, i, 1, n + 1)] + x[index(n, i, 0, n)]) / 2.0;
+            x[index(n, i, n + 1, 0)] = (x[index(n, i, n, 0)] + x[index(n, i, n + 1, 1)]) / 2.0;
+            x[index(n, i, n + 1, n + 1)] =
+                (x[index(n, i, n, n + 1)] + x[index(n, i, n + 1, n)]) / 2.0;
+
+            x[index(n, 0, i, 0)] = (x[index(n, 1, i, 0)] + x[index(n, 0, i, 1)]) / 2.0;
+            x[index(n, n + 1, i, 0)] = (x[index(n, n, i, 0)] + x[index(n, n + 1, i, 0)]) / 2.0;
+            x[index(n, 0, i, n + 1)] = (x[index(n, 0, i, n)] + x[index(n, 1, i, n + 1)]) / 2.0;
+
+            x[index(n, n + 1, i, n + 1)] =
+                (x[index(n, n + 1, i, n)] + x[index(n, n, i, n + 1)]) / 2.0;
+
+            x[index(n, 0, 0, i)] = (x[index(n, 0, 1, i)] + x[index(n, 1, 0, i)]) / 2.0;
+            x[index(n, n + 1, 0, i)] = (x[index(n, n + 1, 1, i)] + x[index(n, n, 0, i)]) / 2.0;
+            x[index(n, 0, n + 1, i)] = (x[index(n, 0, n, i)] + x[index(n, 1, n + 1, i)]) / 2.0;
+
+            x[index(n, n + 1, n + 1, i)] =
+                (x[index(n, n + 1, n, i)] + x[index(n, n, n + 1, i)]) / 2.0;
+        }
         x[index(n, 0, 0, 0)] =
             (x[index(n, 1, 0, 0)] + x[index(n, 0, 1, 0)] + x[index(n, 0, 0, 1)]) / 3.0;
         x[index(n, 0, 0, n + 1)] =

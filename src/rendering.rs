@@ -3,7 +3,7 @@ use std::f32::consts::{FRAC_PI_2, FRAC_PI_8, PI};
 use std::time::Duration;
 
 use anyhow::Result;
-use nalgebra::{Matrix4, Point3};
+use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
 use specs::System;
 use wgpu::util::DeviceExt;
 use wgpu::BindGroupLayout;
@@ -19,6 +19,7 @@ use crate::rendering::texture::Texture;
 use crate::{resources, Position, RenderingInstance, Rotation};
 
 use self::graphics::Instance;
+use self::model::DeformableModel;
 
 pub mod graphics;
 pub mod texture;
@@ -65,6 +66,7 @@ pub struct RenderingState {
     pub texture_bind_group_layout: BindGroupLayout,
     pub instances: Vec<InstanceData>,
     pub instance_render_data: Vec<InstanceRenderData>,
+    deformable_instance_buffer: wgpu::Buffer,
 }
 
 pub struct RenderSystem;
@@ -82,6 +84,7 @@ impl<'a> System<'a> for RenderSystem {
         let mut renderer = renderer_mutex.lock().expect("Could not lock renderer");
 
         let mut instances = Vec::with_capacity(renderer.instances.len());
+        // TODO: Is this bad?
         instances.resize_with(renderer.instances.len(), || Vec::new());
         for (pos, rot, ins) in (&pos, &rot, &ins).join() {
             instances[ins.0].push(
@@ -188,7 +191,7 @@ impl RenderingState {
         };
         surface.configure(&device, &config);
 
-        let camera = Camera::new(Point3::new(0.0, 0.0, 20.0), -FRAC_PI_2, -PI / 20.0);
+        let camera = Camera::new(Point3::new(0.0, 1.0, 2.0), -FRAC_PI_2, -PI / 20.0);
         let projection =
             camera::Projection::new(config.width, config.height, FRAC_PI_8, 0.1, 100.0);
         let camera_controller = camera::CameraController::new(4.0, 0.4);
@@ -330,6 +333,19 @@ impl RenderingState {
 
         // let imgui_renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
 
+        let instances = vec![Instance {
+            position: Vector3::zeros(),
+            rotation: UnitQuaternion::default(),
+        }
+        .to_raw()];
+
+        let deformable_instance_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&instances),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
         Self {
             surface,
             device,
@@ -348,6 +364,7 @@ impl RenderingState {
             texture_bind_group_layout,
             instances: Vec::new(),
             instance_render_data: Vec::new(),
+            deformable_instance_buffer,
         }
     }
     pub async fn create_model(&self, name: &str) -> Model {
@@ -361,7 +378,21 @@ impl RenderingState {
         .unwrap()
     }
 
-    pub(crate) fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub async fn create_deformable_model(&self, name: &str) -> DeformableModel {
+        resources::load_deformable_model(
+            name,
+            &self.device,
+            &self.queue,
+            &self.texture_bind_group_layout,
+        )
+        .await
+        .unwrap()
+    }
+
+    pub(crate) fn render(
+        &mut self,
+        deformable_models: &mut Vec<DeformableModel>,
+    ) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -409,6 +440,26 @@ impl RenderingState {
                     &self.camera_bind_group,
                 );
             }
+
+            for model in deformable_models {
+                for mesh in &mut model.meshes {
+                    render_pass.set_vertex_buffer(1, self.deformable_instance_buffer.slice(..));
+                    mesh.vertex_buffer = Some(self.device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("{:?} Vertex Buffer", mesh.name)),
+                            contents: bytemuck::cast_slice(&mesh.vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        },
+                    ));
+                    render_pass.draw_deformable_mesh_instanced(
+                        mesh,
+                        &model.materials[mesh.material],
+                        0..1,
+                        &self.camera_bind_group,
+                    )
+                }
+            }
+
             drop(render_pass);
         }
 
