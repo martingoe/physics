@@ -1,5 +1,3 @@
-use wgpu::Buffer;
-
 use crate::rendering::texture::Texture;
 use std::ops::Range;
 
@@ -66,6 +64,7 @@ pub struct Mesh {
     pub material: usize,
 }
 
+#[derive(Debug)]
 pub struct DeformableMesh {
     pub name: String,
     pub vertices: Vec<ModelVertex>,
@@ -74,6 +73,9 @@ pub struct DeformableMesh {
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
     pub material: usize,
+    pub(crate) indices: Vec<u32>,
+    pub(crate) pos_arr: Vec<Vec<u32>>,
+    pub(crate) old_indices: Vec<u32>,
 }
 
 pub trait DrawModel<'a> {

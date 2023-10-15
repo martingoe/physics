@@ -1,10 +1,11 @@
-use specs::prelude::*;
+use std::collections::HashSet;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_8, PI};
 use std::time::Duration;
 
 use anyhow::Result;
+use imgui::{Condition, FontSource};
+use imgui_wgpu::{Renderer, RendererConfig};
 use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
-use specs::System;
 use wgpu::util::DeviceExt;
 use wgpu::BindGroupLayout;
 use winit::{event::*, window::Window};
@@ -12,14 +13,14 @@ use winit::{event::*, window::Window};
 use camera::Camera;
 use model::DrawModel;
 
+use crate::physics::pbd::{DistanceConstraint, PBDState, PinToPointConstraint, VolumeConstraint};
 use crate::physics::{InstanceData, InstanceRenderData};
 use crate::rendering::graphics::InstanceRaw;
 use crate::rendering::model::{Model, Vertex};
 use crate::rendering::texture::Texture;
-use crate::{resources, Position, RenderingInstance, Rotation};
+use crate::resources;
 
 use self::graphics::Instance;
-use self::model::DeformableModel;
 
 pub mod graphics;
 pub mod texture;
@@ -60,62 +61,14 @@ pub struct RenderingState {
     camera_bind_group: wgpu::BindGroup,
     depth_texture: Texture,
     pub(crate) mouse_pressed: bool,
-    // pub(crate) imgui: imgui::Context,
-    // imgui_renderer: Renderer,
-    // pub(crate) imgui_winit_platform: imgui_winit_support::WinitPlatform,
+    pub(crate) imgui: imgui::Context,
+    imgui_renderer: Renderer,
+    pub(crate) imgui_winit_platform: imgui_winit_support::WinitPlatform,
     pub texture_bind_group_layout: BindGroupLayout,
     pub instances: Vec<InstanceData>,
     pub instance_render_data: Vec<InstanceRenderData>,
     deformable_instance_buffer: wgpu::Buffer,
-}
-
-pub struct RenderSystem;
-
-impl<'a> System<'a> for RenderSystem {
-    type SystemData = (
-        ReadStorage<'a, Position>,
-        ReadStorage<'a, Rotation>,
-        ReadStorage<'a, RenderingInstance>,
-        Read<'a, crate::Renderer>,
-    );
-
-    fn run(&mut self, (pos, rot, ins, renderer): Self::SystemData) {
-        let renderer_mutex = renderer.0.as_ref().expect("Did not find renderer");
-        let mut renderer = renderer_mutex.lock().expect("Could not lock renderer");
-
-        let mut instances = Vec::with_capacity(renderer.instances.len());
-        // TODO: Is this bad?
-        instances.resize_with(renderer.instances.len(), || Vec::new());
-        for (pos, rot, ins) in (&pos, &rot, &ins).join() {
-            instances[ins.0].push(
-                Instance {
-                    position: pos.0,
-                    rotation: rot.0,
-                }
-                .to_raw(),
-            );
-        }
-
-        renderer.instance_render_data = instances
-            .iter()
-            .enumerate()
-            .map(|(i, instance_data_vec)| {
-                let instance_buffer =
-                    renderer
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Instance Buffer"),
-                            contents: bytemuck::cast_slice(&instance_data_vec),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                InstanceRenderData {
-                    instance_index: i,
-                    instance_count: instance_data_vec.len() as u32,
-                    instance_buffer,
-                }
-            })
-            .collect();
-    }
+    pub pbd_state: PBDState,
 }
 
 impl RenderingState {
@@ -146,7 +99,7 @@ impl RenderingState {
         }
     }
 
-    pub(crate) async fn new(window: &Window) -> Self {
+    pub(crate) async fn new(window: &Window, pbd_state: PBDState) -> Self {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -191,7 +144,7 @@ impl RenderingState {
         };
         surface.configure(&device, &config);
 
-        let camera = Camera::new(Point3::new(0.0, 1.0, 2.0), -FRAC_PI_2, -PI / 20.0);
+        let camera = Camera::new(Point3::new(0.0, 1.0, 8.0), -FRAC_PI_2, -PI / 20.0);
         let projection =
             camera::Projection::new(config.width, config.height, FRAC_PI_8, 0.1, 100.0);
         let camera_controller = camera::CameraController::new(4.0, 0.4);
@@ -307,31 +260,31 @@ impl RenderingState {
         });
 
         // imGUI
-        // let mut imgui = imgui::Context::create();
-        // let mut platform = imgui_winit_support::WinitPlatform::init(&mut imgui);
-        // platform.attach_window(
-        //     imgui.io_mut(),
-        //     &window,
-        //     imgui_winit_support::HiDpiMode::Default,
-        // );
+        let mut imgui = imgui::Context::create();
+        let mut platform = imgui_winit_support::WinitPlatform::init(&mut imgui);
+        platform.attach_window(
+            imgui.io_mut(),
+            &window,
+            imgui_winit_support::HiDpiMode::Default,
+        );
 
-        // let font_size = (13.0 * window.scale_factor()) as f32;
-        // imgui.set_ini_filename(None);
-        // imgui.fonts().add_font(&[FontSource::DefaultFontData {
-        //     config: Some(imgui::FontConfig {
-        //         size_pixels: font_size,
-        //         oversample_h: 1,
-        //         pixel_snap_h: true,
-        //         ..Default::default()
-        //     }),
-        // }]);
+        let font_size = (13.0 * window.scale_factor()) as f32;
+        imgui.set_ini_filename(None);
+        imgui.fonts().add_font(&[FontSource::DefaultFontData {
+            config: Some(imgui::FontConfig {
+                size_pixels: font_size,
+                oversample_h: 1,
+                pixel_snap_h: true,
+                ..Default::default()
+            }),
+        }]);
 
-        // let renderer_config = RendererConfig {
-        //     texture_format: config.format,
-        //     ..Default::default()
-        // };
+        let renderer_config = RendererConfig {
+            texture_format: config.format,
+            ..Default::default()
+        };
 
-        // let imgui_renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
+        let imgui_renderer = Renderer::new(&mut imgui, &device, &queue, renderer_config);
 
         let instances = vec![Instance {
             position: Vector3::zeros(),
@@ -365,6 +318,10 @@ impl RenderingState {
             instances: Vec::new(),
             instance_render_data: Vec::new(),
             deformable_instance_buffer,
+            pbd_state,
+            imgui,
+            imgui_renderer,
+            imgui_winit_platform: platform,
         }
     }
     pub async fn create_model(&self, name: &str) -> Model {
@@ -378,20 +335,98 @@ impl RenderingState {
         .unwrap()
     }
 
-    pub async fn create_deformable_model(&self, name: &str) -> DeformableModel {
-        resources::load_deformable_model(
+    pub async fn create_deformable_model(&mut self, name: &str) {
+        let res = resources::load_deformable_model(
             name,
             &self.device,
             &self.queue,
             &self.texture_bind_group_layout,
         )
         .await
-        .unwrap()
+        .unwrap();
+        // Add actors for vertices
+        let first_actor_index = self.pbd_state.actors.len();
+        for (mesh_index, m) in res.meshes.iter().enumerate() {
+            self.pbd_state.actors.reserve(m.pos_arr.len());
+            for vertex_leader in &m.pos_arr {
+                self.pbd_state.actors.push(crate::physics::pbd::PBDActor {
+                    pos: m.vertices[vertex_leader[0] as usize].position.into(),
+                    mass: 0.1,
+                    inv_mass: 10.0,
+                    mesh_vertex: Some(
+                        vertex_leader
+                            .iter()
+                            .map(|i| crate::DeformableMeshVertex {
+                                model: self.pbd_state.deformable_models.len(),
+                                mesh: mesh_index,
+                                vertex_index: *i as usize,
+                            })
+                            .collect(),
+                    ),
+                    velocity: Vector3::zeros(),
+                    force: Vector3::zeros(),
+                });
+            }
+            let mut neighbors = HashSet::<(u32, u32)>::new();
+
+            for i in (0..m.old_indices.len()).step_by(3) {
+                let i = i as usize;
+
+                insert_pair(&mut neighbors, (m.old_indices[i], m.old_indices[i + 1]));
+                insert_pair(&mut neighbors, (m.old_indices[i + 1], m.old_indices[i + 2]));
+                insert_pair(&mut neighbors, (m.old_indices[i], m.old_indices[i + 2]));
+            }
+
+            let mut initial_volume = 0.0;
+            for i in 0..m.old_indices.len() / 3 {
+                initial_volume += Into::<Vector3<f32>>::into(
+                    m.vertices[m.pos_arr[m.old_indices[3 * i] as usize][0] as usize].position,
+                )
+                .cross(&Into::<Vector3<f32>>::into(
+                    m.vertices[m.pos_arr[m.old_indices[3 * i + 1] as usize][0] as usize].position,
+                ))
+                .dot(&Into::<Vector3<f32>>::into(
+                    m.vertices[m.pos_arr[m.old_indices[3 * i + 2] as usize][0] as usize].position,
+                ));
+            }
+            self.pbd_state.constraints.push(
+                crate::physics::pbd::PBDConstraintComponent::VolumeConstraint(
+                    VolumeConstraint::new(
+                        (first_actor_index..first_actor_index + m.pos_arr.len())
+                            .collect::<Vec<usize>>(),
+                        m.old_indices.clone(),
+                        1.0,
+                        initial_volume,
+                    ),
+                ),
+            );
+
+            self.pbd_state.constraints.reserve(neighbors.len());
+            for (i, j) in neighbors.iter() {
+                self.pbd_state.constraints.push(
+                    crate::physics::pbd::PBDConstraintComponent::DistanceConstraint(
+                        DistanceConstraint::new(
+                            *i as usize + first_actor_index,
+                            *j as usize + first_actor_index,
+                            (Into::<Vector3<f32>>::into(
+                                m.vertices[m.pos_arr[*i as usize][0] as usize].position,
+                            ) - Into::<Vector3<f32>>::into(
+                                m.vertices[m.pos_arr[*j as usize][0] as usize].position,
+                            ))
+                            .norm(),
+                        ),
+                    ),
+                )
+            }
+        }
+
+        self.pbd_state.deformable_models.push(res);
     }
 
     pub(crate) fn render(
         &mut self,
-        deformable_models: &mut Vec<DeformableModel>,
+        dt: Duration,
+        window: &Window,
     ) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -441,9 +476,8 @@ impl RenderingState {
                 );
             }
 
-            for model in deformable_models {
+            for model in &mut self.pbd_state.deformable_models {
                 for mesh in &mut model.meshes {
-                    render_pass.set_vertex_buffer(1, self.deformable_instance_buffer.slice(..));
                     mesh.vertex_buffer = Some(self.device.create_buffer_init(
                         &wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("{:?} Vertex Buffer", mesh.name)),
@@ -451,6 +485,10 @@ impl RenderingState {
                             usage: wgpu::BufferUsages::VERTEX,
                         },
                     ));
+                    render_pass.set_vertex_buffer(1, self.deformable_instance_buffer.slice(..));
+                    // render_pass
+                    // .set_vertex_buffer(1, mesh.vertex_buffer.as_ref().unwrap().slice(..));
+
                     render_pass.draw_deformable_mesh_instanced(
                         mesh,
                         &model.materials[mesh.material],
@@ -461,6 +499,36 @@ impl RenderingState {
             }
 
             drop(render_pass);
+        }
+        {
+            self.imgui.io_mut().update_delta_time(dt);
+
+            self.imgui_winit_platform
+                .prepare_frame(self.imgui.io_mut(), window)
+                .expect("Failed to prepare frame");
+
+            self.prepare_imgui(dt);
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("imGUI Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: None,
+            });
+            self.imgui_renderer
+                .render(
+                    self.imgui.render(),
+                    &self.queue,
+                    &self.device,
+                    &mut render_pass,
+                )
+                .expect("Could not render imgui");
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -481,7 +549,8 @@ impl RenderingState {
         }
     }
 
-    pub(crate) fn update(&mut self, dt: Duration) {
+    pub(crate) fn update(&mut self, dt: Duration, physics_dt: f32) {
+        self.pbd_state.step(physics_dt);
         self.camera_controller.update_camera(&mut self.camera, dt);
         self.camera_uniform
             .update_view_proj(&self.camera, &self.projection);
@@ -491,4 +560,44 @@ impl RenderingState {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
     }
+    fn prepare_imgui(&mut self, dt: Duration) {
+        let ui = self.imgui.frame();
+
+        {
+            let window = ui.window("Hello world");
+            window
+                .size([300.0, 100.0], Condition::FirstUseEver)
+                .build(|| {
+                    ui.text("Hello world!");
+                    ui.text("This...is...imgui-rs on WGPU!");
+                    ui.input_float("dt", &mut 0.0001);
+                    ui.separator();
+                    let is_clicked = ui.button("test");
+                    if is_clicked {
+                        ui.text("clicked the button");
+                    }
+                    let mouse_pos = ui.io().mouse_pos;
+                    ui.text(format!(
+                        "Mouse Position: ({:.1},{:.1})",
+                        mouse_pos[0], mouse_pos[1]
+                    ));
+                });
+
+            let window = ui.window("Hello too");
+
+            window
+                .size([400.0, 200.0], Condition::FirstUseEver)
+                .position([400.0, 200.0], Condition::FirstUseEver)
+                .build(|| {
+                    ui.text(format!("FPS: {:?}", 1.0 / dt.as_secs_f32()));
+                });
+        }
+    }
+}
+
+fn insert_pair(neighbors: &mut HashSet<(u32, u32)>, i: (u32, u32)) {
+    if neighbors.contains(&i) || neighbors.contains(&(i.1, i.0)) {
+        return;
+    }
+    neighbors.insert(i);
 }

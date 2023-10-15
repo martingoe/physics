@@ -4,6 +4,7 @@ use crate::rendering::model::{
     DeformableMesh, DeformableModel, Material, Mesh, Model, ModelVertex,
 };
 use crate::rendering::texture::Texture;
+use std::collections::HashMap;
 use std::io::{BufReader, Cursor};
 
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
@@ -136,9 +137,10 @@ pub async fn load_deformable_model(
         &mut obj_reader,
         &tobj::LoadOptions {
             triangulate: true,
-            single_index: true,
+            single_index: false,
             ..Default::default()
         },
+        // &tobj::OFFLINE_RENDERING_LOAD_OPTIONS,
         |p| async move {
             let mat_text = load_string(&p).await.unwrap();
             tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
@@ -172,36 +174,72 @@ pub async fn load_deformable_model(
     }
 
     let meshes = models
-        .into_iter()
+        .iter()
         .map(|m| {
-            let vertices = (0..m.mesh.positions.len() / 3)
-                .map(|i| ModelVertex {
-                    position: [
-                        m.mesh.positions[i * 3],
-                        m.mesh.positions[i * 3 + 1],
-                        m.mesh.positions[i * 3 + 2],
-                    ],
-                    tex_coords: [m.mesh.texcoords[i * 2], m.mesh.texcoords[i * 2 + 1]],
-                    normal: [
-                        m.mesh.normals[i * 3],
-                        m.mesh.normals[i * 3 + 1],
-                        m.mesh.normals[i * 3 + 2],
-                    ],
-                })
-                .collect::<Vec<_>>();
+            let mut set = HashMap::<(u32, u32), u32>::new();
+            let mut indices = Vec::new();
+            let mut vertices = Vec::new();
+
+            let mut pos_arr: Vec<Vec<u32>> = std::iter::repeat(vec![])
+                .take(m.mesh.positions.len() / 3)
+                .collect();
+
+            let mut current_index = 0;
+            for ((vertex, normal), texcoord) in m
+                .mesh
+                .indices
+                .iter()
+                .zip(m.mesh.normal_indices.iter())
+                .zip(m.mesh.texcoord_indices.iter())
+            {
+                if let Some(index) = set.get(&(*vertex, *normal)) {
+                    indices.push(*index as u32);
+                } else {
+                    set.insert((*vertex, *normal), current_index);
+
+                    pos_arr
+                        .get_mut(*vertex as usize)
+                        .expect("Should be initialized")
+                        .push(current_index);
+                    indices.push(current_index as u32);
+                    vertices.push(ModelVertex {
+                        position: [
+                            m.mesh.positions[*vertex as usize * 3],
+                            m.mesh.positions[*vertex as usize * 3 + 1],
+                            m.mesh.positions[*vertex as usize * 3 + 2],
+                        ],
+                        tex_coords: [
+                            m.mesh.texcoords[*texcoord as usize * 2],
+                            m.mesh.texcoords[*texcoord as usize * 2 + 1],
+                        ],
+                        normal: [
+                            m.mesh.normals[*normal as usize * 3 as usize],
+                            m.mesh.normals[*normal as usize * 3 + 1 as usize],
+                            m.mesh.normals[*normal as usize * 3 + 2 as usize],
+                        ],
+                    });
+
+                    current_index += 1;
+                };
+            }
+
             let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("{:?} Index Buffer", file_name)),
-                contents: bytemuck::cast_slice(&m.mesh.indices),
+                contents: bytemuck::cast_slice(&indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
 
+            let num_elements = indices.len() as u32;
             DeformableMesh {
                 name: file_name.to_string(),
                 vertices,
                 vertex_buffer: None,
+                indices,
+                old_indices: m.mesh.indices.clone(),
                 index_buffer,
-                num_elements: m.mesh.indices.len() as u32,
+                num_elements,
                 material: m.mesh.material_id.unwrap_or(0),
+                pos_arr,
             }
         })
         .collect::<Vec<_>>();
